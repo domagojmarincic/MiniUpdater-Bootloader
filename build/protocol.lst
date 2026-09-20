@@ -1,0 +1,1452 @@
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 1
+
+
+   1              		.cpu cortex-m0plus
+   2              		.arch armv6s-m
+   3              		.fpu softvfp
+   4              		.eabi_attribute 20, 1
+   5              		.eabi_attribute 21, 1
+   6              		.eabi_attribute 23, 3
+   7              		.eabi_attribute 24, 1
+   8              		.eabi_attribute 25, 1
+   9              		.eabi_attribute 26, 1
+  10              		.eabi_attribute 30, 1
+  11              		.eabi_attribute 34, 0
+  12              		.eabi_attribute 18, 4
+  13              		.file	"protocol.c"
+  14              		.text
+  15              	.Ltext0:
+  16              		.cfi_sections	.debug_frame
+  17              		.file 1 "App/Src/protocol.c"
+  18              		.section	.text.CalculateChecksum,"ax",%progbits
+  19              		.align	1
+  20              		.syntax unified
+  21              		.code	16
+  22              		.thumb_func
+  24              	CalculateChecksum:
+  25              	.LVL0:
+  26              	.LFB380:
+   1:App/Src/protocol.c **** #include "protocol.h"
+   2:App/Src/protocol.c **** #include "bootloader.h"
+   3:App/Src/protocol.c **** #include "usbd_cdc_if.h"
+   4:App/Src/protocol.c **** #include <string.h>
+   5:App/Src/protocol.c **** #include <stdio.h>
+   6:App/Src/protocol.c **** #include "stm32g0xx_hal.h"
+   7:App/Src/protocol.c **** 
+   8:App/Src/protocol.c **** static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length);
+   9:App/Src/protocol.c **** static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length);
+  10:App/Src/protocol.c **** static bool Flash_ErasePage(uint32_t address);
+  11:App/Src/protocol.c **** static uint16_t CalculateChecksum();
+  12:App/Src/protocol.c **** 
+  13:App/Src/protocol.c **** static ProtocolState_t protocol_state = PROTOCOL_STATE_IDLE;
+  14:App/Src/protocol.c **** static uint16_t packet_size = 0;
+  15:App/Src/protocol.c **** 
+  16:App/Src/protocol.c **** static uint8_t rx_buffer[PACKET_SIZE + 4];
+  17:App/Src/protocol.c **** static uint32_t rx_buffer_filled = 0;
+  18:App/Src/protocol.c **** static uint32_t expected_bytes = 1;
+  19:App/Src/protocol.c **** 
+  20:App/Src/protocol.c **** static uint32_t current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+  21:App/Src/protocol.c **** static uint32_t last_erased_page = 0xFFFFFFFF;
+  22:App/Src/protocol.c **** 
+  23:App/Src/protocol.c **** void Protocol_Init(void)
+  24:App/Src/protocol.c **** {
+  25:App/Src/protocol.c **** 	protocol_state = PROTOCOL_STATE_IDLE;
+  26:App/Src/protocol.c **** 	packet_size = 0;
+  27:App/Src/protocol.c **** 	rx_buffer_filled = 0;
+  28:App/Src/protocol.c **** 	expected_bytes = 1;
+  29:App/Src/protocol.c **** 	current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+  30:App/Src/protocol.c **** 	last_erased_page = 0xFFFFFFFF;
+  31:App/Src/protocol.c **** }
+  32:App/Src/protocol.c **** 
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 2
+
+
+  33:App/Src/protocol.c **** static void ProcessCompleteMessage(void);
+  34:App/Src/protocol.c **** 
+  35:App/Src/protocol.c **** void Protocol_ProcessByte(uint8_t *data, uint32_t len)
+  36:App/Src/protocol.c **** {
+  37:App/Src/protocol.c ****     for (uint32_t i = 0; i < len; i++)
+  38:App/Src/protocol.c ****     {
+  39:App/Src/protocol.c ****         if (rx_buffer_filled < sizeof(rx_buffer))
+  40:App/Src/protocol.c ****         {
+  41:App/Src/protocol.c ****             rx_buffer[rx_buffer_filled++] = data[i];
+  42:App/Src/protocol.c ****         }
+  43:App/Src/protocol.c **** 
+  44:App/Src/protocol.c ****         if (rx_buffer_filled == expected_bytes)
+  45:App/Src/protocol.c ****         {
+  46:App/Src/protocol.c ****             ProcessCompleteMessage();
+  47:App/Src/protocol.c ****         }
+  48:App/Src/protocol.c ****     }
+  49:App/Src/protocol.c **** }
+  50:App/Src/protocol.c **** 
+  51:App/Src/protocol.c **** static void ProcessCompleteMessage(void)
+  52:App/Src/protocol.c **** {
+  53:App/Src/protocol.c ****     uint8_t cmd = rx_buffer[0];
+  54:App/Src/protocol.c ****     bool complete = true;
+  55:App/Src/protocol.c **** 
+  56:App/Src/protocol.c ****     switch (cmd)
+  57:App/Src/protocol.c ****     {
+  58:App/Src/protocol.c ****     case CMD_SET_PACKET_SIZE:
+  59:App/Src/protocol.c ****     	complete = SetPacketSize();
+  60:App/Src/protocol.c ****     	break;
+  61:App/Src/protocol.c **** 
+  62:App/Src/protocol.c ****     case CMD_START_TRANSFER:
+  63:App/Src/protocol.c ****         complete = StartTransfer();
+  64:App/Src/protocol.c ****         break;
+  65:App/Src/protocol.c **** 
+  66:App/Src/protocol.c ****     case CMD_DATA_BLOCK_WITH_CRC:
+  67:App/Src/protocol.c ****     	complete = CheckCRC();
+  68:App/Src/protocol.c ****         break;
+  69:App/Src/protocol.c **** 
+  70:App/Src/protocol.c ****     case CMD_END_TRANSFER:
+  71:App/Src/protocol.c ****         complete = EndTransfer();
+  72:App/Src/protocol.c ****         break;
+  73:App/Src/protocol.c **** 
+  74:App/Src/protocol.c ****     default:
+  75:App/Src/protocol.c ****         printf("Nepoznata komanda: 0x%02X\r\n", cmd);
+  76:App/Src/protocol.c ****         break;
+  77:App/Src/protocol.c ****     }
+  78:App/Src/protocol.c ****     if (complete)
+  79:App/Src/protocol.c **** 	{
+  80:App/Src/protocol.c **** 	  rx_buffer_filled = 0;
+  81:App/Src/protocol.c **** 	  expected_bytes = 1;
+  82:App/Src/protocol.c **** 	}
+  83:App/Src/protocol.c **** }
+  84:App/Src/protocol.c **** 
+  85:App/Src/protocol.c **** bool SetPacketSize()
+  86:App/Src/protocol.c **** {
+  87:App/Src/protocol.c **** 	packet_size = PACKET_SIZE;
+  88:App/Src/protocol.c **** 	return true;
+  89:App/Src/protocol.c **** }
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 3
+
+
+  90:App/Src/protocol.c **** bool StartTransfer()
+  91:App/Src/protocol.c **** {
+  92:App/Src/protocol.c **** 	protocol_state = PROTOCOL_STATE_RECEIVING_DATA;
+  93:App/Src/protocol.c **** 	return true;
+  94:App/Src/protocol.c **** }
+  95:App/Src/protocol.c **** bool CheckCRC()
+  96:App/Src/protocol.c **** {
+  97:App/Src/protocol.c **** 	if(expected_bytes == 1)
+  98:App/Src/protocol.c **** 	{
+  99:App/Src/protocol.c **** 	  expected_bytes = CMD_SIZE + PACKET_SIZE + CRC_SIZE;
+ 100:App/Src/protocol.c **** 	  return false;
+ 101:App/Src/protocol.c **** 	}
+ 102:App/Src/protocol.c **** 	uint16_t received_crc = (uint16_t)(rx_buffer[1 + PACKET_SIZE] | (rx_buffer[1 + PACKET_SIZE + 1] <<
+ 103:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 104:App/Src/protocol.c **** 
+ 105:App/Src/protocol.c **** 	if (received_crc != calculated_crc)
+ 106:App/Src/protocol.c **** 	{
+ 107:App/Src/protocol.c **** 	  printf("CRC POGRESAN! primljen=0x%04X, izracunat=0x%04X\r\n", received_crc, calculated_crc);
+ 108:App/Src/protocol.c **** 	  /* NE piši u flash, NE pomiči offset - blok je oštećen */
+ 109:App/Src/protocol.c **** 	  return true;   /* poruka JEST kompletna, samo je odbijena */
+ 110:App/Src/protocol.c **** 	}
+ 111:App/Src/protocol.c **** 
+ 112:App/Src/protocol.c **** 	if (Flash_WriteBlock(current_flash_offset, &rx_buffer[1], PACKET_SIZE))
+ 113:App/Src/protocol.c **** 	{
+ 114:App/Src/protocol.c **** 	  current_flash_offset += PACKET_SIZE;
+ 115:App/Src/protocol.c **** 	}
+ 116:App/Src/protocol.c **** 	else
+ 117:App/Src/protocol.c **** 	{
+ 118:App/Src/protocol.c **** 	  printf("Flash write GRESKA!\r\n");
+ 119:App/Src/protocol.c **** 	}
+ 120:App/Src/protocol.c **** 
+ 121:App/Src/protocol.c **** 	return true;
+ 122:App/Src/protocol.c **** }
+ 123:App/Src/protocol.c **** bool EndTransfer()
+ 124:App/Src/protocol.c **** {
+ 125:App/Src/protocol.c **** 	Bootloader_JumpToApplication();
+ 126:App/Src/protocol.c **** 	return true;
+ 127:App/Src/protocol.c **** }
+ 128:App/Src/protocol.c **** 
+ 129:App/Src/protocol.c **** static bool Flash_ErasePage(uint32_t address)
+ 130:App/Src/protocol.c **** {
+ 131:App/Src/protocol.c ****     uint32_t current_page = (address - START_ADDRESS) / FLASH_PAGE_SIZE;
+ 132:App/Src/protocol.c **** 
+ 133:App/Src/protocol.c ****     if (current_page == last_erased_page)
+ 134:App/Src/protocol.c ****     {
+ 135:App/Src/protocol.c ****         return true;
+ 136:App/Src/protocol.c ****     }
+ 137:App/Src/protocol.c **** 
+ 138:App/Src/protocol.c ****     FLASH_EraseInitTypeDef erase_init;
+ 139:App/Src/protocol.c ****     uint32_t page_error;
+ 140:App/Src/protocol.c **** 
+ 141:App/Src/protocol.c ****     erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
+ 142:App/Src/protocol.c ****     erase_init.Page = current_page;
+ 143:App/Src/protocol.c ****     erase_init.NbPages = 1;
+ 144:App/Src/protocol.c **** 
+ 145:App/Src/protocol.c ****     if (HAL_FLASHEx_Erase(&erase_init, &page_error) != HAL_OK)
+ 146:App/Src/protocol.c ****     {
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 4
+
+
+ 147:App/Src/protocol.c ****         return false;
+ 148:App/Src/protocol.c ****     }
+ 149:App/Src/protocol.c **** 
+ 150:App/Src/protocol.c ****     last_erased_page = current_page;
+ 151:App/Src/protocol.c ****     return true;
+ 152:App/Src/protocol.c **** }
+ 153:App/Src/protocol.c **** 
+ 154:App/Src/protocol.c **** static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length)
+ 155:App/Src/protocol.c **** {
+ 156:App/Src/protocol.c ****     for (uint32_t i = 0; i < length; i += 8)
+ 157:App/Src/protocol.c ****     {
+ 158:App/Src/protocol.c ****         uint64_t doubleword;
+ 159:App/Src/protocol.c ****         memcpy(&doubleword, &data[i], 8);
+ 160:App/Src/protocol.c **** 
+ 161:App/Src/protocol.c ****         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, doubleword) != HAL_OK)
+ 162:App/Src/protocol.c ****         {
+ 163:App/Src/protocol.c ****             return false;
+ 164:App/Src/protocol.c ****         }
+ 165:App/Src/protocol.c ****     }
+ 166:App/Src/protocol.c **** 
+ 167:App/Src/protocol.c ****     return true;
+ 168:App/Src/protocol.c **** }
+ 169:App/Src/protocol.c **** 
+ 170:App/Src/protocol.c **** static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length)
+ 171:App/Src/protocol.c **** {
+ 172:App/Src/protocol.c ****     HAL_FLASH_Unlock();
+ 173:App/Src/protocol.c **** 
+ 174:App/Src/protocol.c ****     bool erase_ok = Flash_ErasePage(address);
+ 175:App/Src/protocol.c ****     bool write_ok = false;
+ 176:App/Src/protocol.c **** 
+ 177:App/Src/protocol.c ****     if (erase_ok)
+ 178:App/Src/protocol.c ****     {
+ 179:App/Src/protocol.c ****         write_ok = Flash_ProgramData(address, data, length);
+ 180:App/Src/protocol.c ****     }
+ 181:App/Src/protocol.c **** 
+ 182:App/Src/protocol.c ****     HAL_FLASH_Lock();
+ 183:App/Src/protocol.c **** 
+ 184:App/Src/protocol.c ****     return (erase_ok && write_ok);
+ 185:App/Src/protocol.c **** }
+ 186:App/Src/protocol.c **** static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length)
+ 187:App/Src/protocol.c **** {
+  27              		.loc 1 187 1 view -0
+  28              		.cfi_startproc
+  29              		@ args = 0, pretend = 0, frame = 0
+  30              		@ frame_needed = 0, uses_anonymous_args = 0
+  31              		.loc 1 187 1 is_stmt 0 view .LVU1
+  32 0000 30B5     		push	{r4, r5, lr}
+  33              	.LCFI0:
+  34              		.cfi_def_cfa_offset 12
+  35              		.cfi_offset 4, -12
+  36              		.cfi_offset 5, -8
+  37              		.cfi_offset 14, -4
+  38 0002 0500     		movs	r5, r0
+ 188:App/Src/protocol.c ****     uint16_t crc = 0xFFFF;
+  39              		.loc 1 188 5 is_stmt 1 view .LVU2
+  40              	.LVL1:
+ 189:App/Src/protocol.c **** 
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 5
+
+
+ 190:App/Src/protocol.c ****     for (uint32_t i = 0; i < length; i++)
+  41              		.loc 1 190 5 view .LVU3
+  42              	.LBB2:
+  43              		.loc 1 190 10 view .LVU4
+  44              		.loc 1 190 19 is_stmt 0 view .LVU5
+  45 0004 0024     		movs	r4, #0
+  46              	.LBE2:
+ 188:App/Src/protocol.c ****     uint16_t crc = 0xFFFF;
+  47              		.loc 1 188 14 view .LVU6
+  48 0006 0C48     		ldr	r0, .L11
+  49              	.LVL2:
+  50              	.LBB5:
+  51              		.loc 1 190 5 view .LVU7
+  52 0008 0EE0     		b	.L2
+  53              	.LVL3:
+  54              	.L9:
+  55              	.LBB3:
+ 191:App/Src/protocol.c ****     {
+ 192:App/Src/protocol.c ****         crc ^= (uint16_t)data[i] << 8;
+ 193:App/Src/protocol.c **** 
+ 194:App/Src/protocol.c ****         for (uint8_t bit = 0; bit < 8; bit++)
+ 195:App/Src/protocol.c ****         {
+ 196:App/Src/protocol.c ****             if (crc & 0x8000)
+ 197:App/Src/protocol.c ****             {
+ 198:App/Src/protocol.c ****                 crc = (crc << 1) ^ 0x1021;
+  56              		.loc 1 198 17 is_stmt 1 view .LVU8
+  57              		.loc 1 198 34 is_stmt 0 view .LVU9
+  58 000a 5200     		lsls	r2, r2, #1
+  59 000c 0B48     		ldr	r0, .L11+4
+  60              	.LVL4:
+  61              		.loc 1 198 34 view .LVU10
+  62 000e 5040     		eors	r0, r2
+  63              		.loc 1 198 21 view .LVU11
+  64 0010 80B2     		uxth	r0, r0
+  65              	.LVL5:
+  66              	.L5:
+ 194:App/Src/protocol.c ****         {
+  67              		.loc 1 194 43 is_stmt 1 discriminator 2 view .LVU12
+  68 0012 0133     		adds	r3, r3, #1
+  69              	.LVL6:
+ 194:App/Src/protocol.c ****         {
+  70              		.loc 1 194 43 is_stmt 0 discriminator 2 view .LVU13
+  71 0014 DBB2     		uxtb	r3, r3
+  72              	.LVL7:
+  73              	.L3:
+ 194:App/Src/protocol.c ****         {
+  74              		.loc 1 194 35 is_stmt 1 discriminator 1 view .LVU14
+  75 0016 072B     		cmp	r3, #7
+  76 0018 05D8     		bhi	.L8
+ 196:App/Src/protocol.c ****             {
+  77              		.loc 1 196 13 view .LVU15
+ 196:App/Src/protocol.c ****             {
+  78              		.loc 1 196 17 is_stmt 0 view .LVU16
+  79 001a 02B2     		sxth	r2, r0
+ 196:App/Src/protocol.c ****             {
+  80              		.loc 1 196 16 view .LVU17
+  81 001c 002A     		cmp	r2, #0
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 6
+
+
+  82 001e F4DB     		blt	.L9
+ 199:App/Src/protocol.c ****             }
+ 200:App/Src/protocol.c ****             else
+ 201:App/Src/protocol.c ****             {
+ 202:App/Src/protocol.c ****                 crc = crc << 1;
+  83              		.loc 1 202 17 is_stmt 1 view .LVU18
+  84              		.loc 1 202 21 is_stmt 0 view .LVU19
+  85 0020 4000     		lsls	r0, r0, #1
+  86              	.LVL8:
+  87              		.loc 1 202 21 view .LVU20
+  88 0022 80B2     		uxth	r0, r0
+  89 0024 F5E7     		b	.L5
+  90              	.LVL9:
+  91              	.L8:
+  92              		.loc 1 202 21 view .LVU21
+  93              	.LBE3:
+ 190:App/Src/protocol.c ****     {
+  94              		.loc 1 190 39 is_stmt 1 discriminator 2 view .LVU22
+  95 0026 0134     		adds	r4, r4, #1
+  96              	.LVL10:
+  97              	.L2:
+ 190:App/Src/protocol.c ****     {
+  98              		.loc 1 190 28 discriminator 1 view .LVU23
+  99 0028 8C42     		cmp	r4, r1
+ 100 002a 04D2     		bcs	.L10
+ 192:App/Src/protocol.c **** 
+ 101              		.loc 1 192 9 view .LVU24
+ 192:App/Src/protocol.c **** 
+ 102              		.loc 1 192 30 is_stmt 0 view .LVU25
+ 103 002c 2B5D     		ldrb	r3, [r5, r4]
+ 192:App/Src/protocol.c **** 
+ 104              		.loc 1 192 13 view .LVU26
+ 105 002e 1B02     		lsls	r3, r3, #8
+ 106 0030 5840     		eors	r0, r3
+ 107              	.LVL11:
+ 194:App/Src/protocol.c ****         {
+ 108              		.loc 1 194 9 is_stmt 1 view .LVU27
+ 109              	.LBB4:
+ 194:App/Src/protocol.c ****         {
+ 110              		.loc 1 194 14 view .LVU28
+ 194:App/Src/protocol.c ****         {
+ 111              		.loc 1 194 22 is_stmt 0 view .LVU29
+ 112 0032 0023     		movs	r3, #0
+ 194:App/Src/protocol.c ****         {
+ 113              		.loc 1 194 9 view .LVU30
+ 114 0034 EFE7     		b	.L3
+ 115              	.LVL12:
+ 116              	.L10:
+ 194:App/Src/protocol.c ****         {
+ 117              		.loc 1 194 9 view .LVU31
+ 118              	.LBE4:
+ 119              	.LBE5:
+ 203:App/Src/protocol.c ****             }
+ 204:App/Src/protocol.c ****         }
+ 205:App/Src/protocol.c ****     }
+ 206:App/Src/protocol.c **** 
+ 207:App/Src/protocol.c ****     return crc;
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 7
+
+
+ 120              		.loc 1 207 5 is_stmt 1 view .LVU32
+ 208:App/Src/protocol.c **** }
+ 121              		.loc 1 208 1 is_stmt 0 view .LVU33
+ 122              		@ sp needed
+ 123              	.LVL13:
+ 124              	.LVL14:
+ 125              		.loc 1 208 1 view .LVU34
+ 126 0036 30BD     		pop	{r4, r5, pc}
+ 127              	.L12:
+ 128              		.align	2
+ 129              	.L11:
+ 130 0038 FFFF0000 		.word	65535
+ 131 003c 21100000 		.word	4129
+ 132              		.cfi_endproc
+ 133              	.LFE380:
+ 135              		.section	.text.Flash_ErasePage,"ax",%progbits
+ 136              		.align	1
+ 137              		.syntax unified
+ 138              		.code	16
+ 139              		.thumb_func
+ 141              	Flash_ErasePage:
+ 142              	.LVL15:
+ 143              	.LFB377:
+ 130:App/Src/protocol.c ****     uint32_t current_page = (address - START_ADDRESS) / FLASH_PAGE_SIZE;
+ 144              		.loc 1 130 1 is_stmt 1 view -0
+ 145              		.cfi_startproc
+ 146              		@ args = 0, pretend = 0, frame = 24
+ 147              		@ frame_needed = 0, uses_anonymous_args = 0
+ 130:App/Src/protocol.c ****     uint32_t current_page = (address - START_ADDRESS) / FLASH_PAGE_SIZE;
+ 148              		.loc 1 130 1 is_stmt 0 view .LVU36
+ 149 0000 10B5     		push	{r4, lr}
+ 150              	.LCFI1:
+ 151              		.cfi_def_cfa_offset 8
+ 152              		.cfi_offset 4, -8
+ 153              		.cfi_offset 14, -4
+ 154 0002 86B0     		sub	sp, sp, #24
+ 155              	.LCFI2:
+ 156              		.cfi_def_cfa_offset 32
+ 131:App/Src/protocol.c **** 
+ 157              		.loc 1 131 5 is_stmt 1 view .LVU37
+ 131:App/Src/protocol.c **** 
+ 158              		.loc 1 131 38 is_stmt 0 view .LVU38
+ 159 0004 F823     		movs	r3, #248
+ 160 0006 1B06     		lsls	r3, r3, #24
+ 161 0008 C418     		adds	r4, r0, r3
+ 131:App/Src/protocol.c **** 
+ 162              		.loc 1 131 14 view .LVU39
+ 163 000a E40A     		lsrs	r4, r4, #11
+ 164              	.LVL16:
+ 133:App/Src/protocol.c ****     {
+ 165              		.loc 1 133 5 is_stmt 1 view .LVU40
+ 133:App/Src/protocol.c ****     {
+ 166              		.loc 1 133 22 is_stmt 0 view .LVU41
+ 167 000c 0B4B     		ldr	r3, .L17
+ 168 000e 1B68     		ldr	r3, [r3]
+ 133:App/Src/protocol.c ****     {
+ 169              		.loc 1 133 8 view .LVU42
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 8
+
+
+ 170 0010 A342     		cmp	r3, r4
+ 171 0012 0FD0     		beq	.L15
+ 138:App/Src/protocol.c ****     uint32_t page_error;
+ 172              		.loc 1 138 5 is_stmt 1 view .LVU43
+ 139:App/Src/protocol.c **** 
+ 173              		.loc 1 139 5 view .LVU44
+ 141:App/Src/protocol.c ****     erase_init.Page = current_page;
+ 174              		.loc 1 141 5 view .LVU45
+ 141:App/Src/protocol.c ****     erase_init.Page = current_page;
+ 175              		.loc 1 141 26 is_stmt 0 view .LVU46
+ 176 0014 02A8     		add	r0, sp, #8
+ 177              	.LVL17:
+ 141:App/Src/protocol.c ****     erase_init.Page = current_page;
+ 178              		.loc 1 141 26 view .LVU47
+ 179 0016 0223     		movs	r3, #2
+ 180 0018 0293     		str	r3, [sp, #8]
+ 142:App/Src/protocol.c ****     erase_init.NbPages = 1;
+ 181              		.loc 1 142 5 is_stmt 1 view .LVU48
+ 142:App/Src/protocol.c ****     erase_init.NbPages = 1;
+ 182              		.loc 1 142 21 is_stmt 0 view .LVU49
+ 183 001a 8460     		str	r4, [r0, #8]
+ 143:App/Src/protocol.c **** 
+ 184              		.loc 1 143 5 is_stmt 1 view .LVU50
+ 143:App/Src/protocol.c **** 
+ 185              		.loc 1 143 24 is_stmt 0 view .LVU51
+ 186 001c 013B     		subs	r3, r3, #1
+ 187 001e C360     		str	r3, [r0, #12]
+ 145:App/Src/protocol.c ****     {
+ 188              		.loc 1 145 5 is_stmt 1 view .LVU52
+ 145:App/Src/protocol.c ****     {
+ 189              		.loc 1 145 9 is_stmt 0 view .LVU53
+ 190 0020 01A9     		add	r1, sp, #4
+ 191 0022 FFF7FEFF 		bl	HAL_FLASHEx_Erase
+ 192              	.LVL18:
+ 145:App/Src/protocol.c ****     {
+ 193              		.loc 1 145 8 discriminator 1 view .LVU54
+ 194 0026 0028     		cmp	r0, #0
+ 195 0028 06D1     		bne	.L16
+ 150:App/Src/protocol.c ****     return true;
+ 196              		.loc 1 150 5 is_stmt 1 view .LVU55
+ 150:App/Src/protocol.c ****     return true;
+ 197              		.loc 1 150 22 is_stmt 0 view .LVU56
+ 198 002a 044B     		ldr	r3, .L17
+ 199 002c 1C60     		str	r4, [r3]
+ 151:App/Src/protocol.c **** }
+ 200              		.loc 1 151 5 is_stmt 1 view .LVU57
+ 151:App/Src/protocol.c **** }
+ 201              		.loc 1 151 12 is_stmt 0 view .LVU58
+ 202 002e 0130     		adds	r0, r0, #1
+ 203              	.L14:
+ 152:App/Src/protocol.c **** 
+ 204              		.loc 1 152 1 view .LVU59
+ 205 0030 06B0     		add	sp, sp, #24
+ 206              		@ sp needed
+ 207              	.LVL19:
+ 152:App/Src/protocol.c **** 
+ 208              		.loc 1 152 1 view .LVU60
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 9
+
+
+ 209 0032 10BD     		pop	{r4, pc}
+ 210              	.LVL20:
+ 211              	.L15:
+ 135:App/Src/protocol.c ****     }
+ 212              		.loc 1 135 16 view .LVU61
+ 213 0034 0120     		movs	r0, #1
+ 214              	.LVL21:
+ 135:App/Src/protocol.c ****     }
+ 215              		.loc 1 135 16 view .LVU62
+ 216 0036 FBE7     		b	.L14
+ 217              	.L16:
+ 147:App/Src/protocol.c ****     }
+ 218              		.loc 1 147 16 view .LVU63
+ 219 0038 0020     		movs	r0, #0
+ 220 003a F9E7     		b	.L14
+ 221              	.L18:
+ 222              		.align	2
+ 223              	.L17:
+ 224 003c 00000000 		.word	last_erased_page
+ 225              		.cfi_endproc
+ 226              	.LFE377:
+ 228              		.section	.text.Flash_ProgramData,"ax",%progbits
+ 229              		.align	1
+ 230              		.syntax unified
+ 231              		.code	16
+ 232              		.thumb_func
+ 234              	Flash_ProgramData:
+ 235              	.LVL22:
+ 236              	.LFB378:
+ 155:App/Src/protocol.c ****     for (uint32_t i = 0; i < length; i += 8)
+ 237              		.loc 1 155 1 is_stmt 1 view -0
+ 238              		.cfi_startproc
+ 239              		@ args = 0, pretend = 0, frame = 8
+ 240              		@ frame_needed = 0, uses_anonymous_args = 0
+ 155:App/Src/protocol.c ****     for (uint32_t i = 0; i < length; i += 8)
+ 241              		.loc 1 155 1 is_stmt 0 view .LVU65
+ 242 0000 F0B5     		push	{r4, r5, r6, r7, lr}
+ 243              	.LCFI3:
+ 244              		.cfi_def_cfa_offset 20
+ 245              		.cfi_offset 4, -20
+ 246              		.cfi_offset 5, -16
+ 247              		.cfi_offset 6, -12
+ 248              		.cfi_offset 7, -8
+ 249              		.cfi_offset 14, -4
+ 250 0002 83B0     		sub	sp, sp, #12
+ 251              	.LCFI4:
+ 252              		.cfi_def_cfa_offset 32
+ 253 0004 0700     		movs	r7, r0
+ 254 0006 0E00     		movs	r6, r1
+ 255 0008 1500     		movs	r5, r2
+ 156:App/Src/protocol.c ****     {
+ 256              		.loc 1 156 5 is_stmt 1 view .LVU66
+ 257              	.LBB6:
+ 156:App/Src/protocol.c ****     {
+ 258              		.loc 1 156 10 view .LVU67
+ 259              	.LVL23:
+ 156:App/Src/protocol.c ****     {
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 10
+
+
+ 260              		.loc 1 156 19 is_stmt 0 view .LVU68
+ 261 000a 0024     		movs	r4, #0
+ 156:App/Src/protocol.c ****     {
+ 262              		.loc 1 156 5 view .LVU69
+ 263 000c 00E0     		b	.L20
+ 264              	.LVL24:
+ 265              	.L21:
+ 156:App/Src/protocol.c ****     {
+ 266              		.loc 1 156 40 is_stmt 1 discriminator 2 view .LVU70
+ 267 000e 0834     		adds	r4, r4, #8
+ 268              	.LVL25:
+ 269              	.L20:
+ 156:App/Src/protocol.c ****     {
+ 270              		.loc 1 156 28 discriminator 1 view .LVU71
+ 271 0010 AC42     		cmp	r4, r5
+ 272 0012 0ED2     		bcs	.L24
+ 273              	.LBB7:
+ 158:App/Src/protocol.c ****         memcpy(&doubleword, &data[i], 8);
+ 274              		.loc 1 158 9 view .LVU72
+ 159:App/Src/protocol.c **** 
+ 275              		.loc 1 159 9 view .LVU73
+ 159:App/Src/protocol.c **** 
+ 276              		.loc 1 159 29 is_stmt 0 view .LVU74
+ 277 0014 3119     		adds	r1, r6, r4
+ 159:App/Src/protocol.c **** 
+ 278              		.loc 1 159 9 view .LVU75
+ 279 0016 0822     		movs	r2, #8
+ 280 0018 6846     		mov	r0, sp
+ 281 001a FFF7FEFF 		bl	memcpy
+ 282              	.LVL26:
+ 161:App/Src/protocol.c ****         {
+ 283              		.loc 1 161 9 is_stmt 1 view .LVU76
+ 161:App/Src/protocol.c ****         {
+ 284              		.loc 1 161 13 is_stmt 0 view .LVU77
+ 285 001e 009A     		ldr	r2, [sp]
+ 286 0020 019B     		ldr	r3, [sp, #4]
+ 287 0022 E119     		adds	r1, r4, r7
+ 288 0024 0120     		movs	r0, #1
+ 289 0026 FFF7FEFF 		bl	HAL_FLASH_Program
+ 290              	.LVL27:
+ 161:App/Src/protocol.c ****         {
+ 291              		.loc 1 161 12 discriminator 1 view .LVU78
+ 292 002a 0028     		cmp	r0, #0
+ 293 002c EFD0     		beq	.L21
+ 163:App/Src/protocol.c ****         }
+ 294              		.loc 1 163 13 is_stmt 1 view .LVU79
+ 163:App/Src/protocol.c ****         }
+ 295              		.loc 1 163 20 is_stmt 0 view .LVU80
+ 296 002e 0020     		movs	r0, #0
+ 297 0030 00E0     		b	.L22
+ 298              	.L24:
+ 163:App/Src/protocol.c ****         }
+ 299              		.loc 1 163 20 view .LVU81
+ 300              	.LBE7:
+ 301              	.LBE6:
+ 167:App/Src/protocol.c **** }
+ 302              		.loc 1 167 12 view .LVU82
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 11
+
+
+ 303 0032 0120     		movs	r0, #1
+ 304              	.L22:
+ 168:App/Src/protocol.c **** 
+ 305              		.loc 1 168 1 view .LVU83
+ 306 0034 03B0     		add	sp, sp, #12
+ 307              		@ sp needed
+ 308              	.LVL28:
+ 309              	.LVL29:
+ 310              	.LVL30:
+ 311              	.LVL31:
+ 168:App/Src/protocol.c **** 
+ 312              		.loc 1 168 1 view .LVU84
+ 313 0036 F0BD     		pop	{r4, r5, r6, r7, pc}
+ 314              		.cfi_endproc
+ 315              	.LFE378:
+ 317              		.section	.text.Flash_WriteBlock,"ax",%progbits
+ 318              		.align	1
+ 319              		.syntax unified
+ 320              		.code	16
+ 321              		.thumb_func
+ 323              	Flash_WriteBlock:
+ 324              	.LVL32:
+ 325              	.LFB379:
+ 171:App/Src/protocol.c ****     HAL_FLASH_Unlock();
+ 326              		.loc 1 171 1 is_stmt 1 view -0
+ 327              		.cfi_startproc
+ 328              		@ args = 0, pretend = 0, frame = 0
+ 329              		@ frame_needed = 0, uses_anonymous_args = 0
+ 171:App/Src/protocol.c ****     HAL_FLASH_Unlock();
+ 330              		.loc 1 171 1 is_stmt 0 view .LVU86
+ 331 0000 70B5     		push	{r4, r5, r6, lr}
+ 332              	.LCFI5:
+ 333              		.cfi_def_cfa_offset 16
+ 334              		.cfi_offset 4, -16
+ 335              		.cfi_offset 5, -12
+ 336              		.cfi_offset 6, -8
+ 337              		.cfi_offset 14, -4
+ 338 0002 0400     		movs	r4, r0
+ 339 0004 0D00     		movs	r5, r1
+ 340 0006 1600     		movs	r6, r2
+ 172:App/Src/protocol.c **** 
+ 341              		.loc 1 172 5 is_stmt 1 view .LVU87
+ 342 0008 FFF7FEFF 		bl	HAL_FLASH_Unlock
+ 343              	.LVL33:
+ 174:App/Src/protocol.c ****     bool write_ok = false;
+ 344              		.loc 1 174 5 view .LVU88
+ 174:App/Src/protocol.c ****     bool write_ok = false;
+ 345              		.loc 1 174 21 is_stmt 0 view .LVU89
+ 346 000c 2000     		movs	r0, r4
+ 347 000e FFF7FEFF 		bl	Flash_ErasePage
+ 348              	.LVL34:
+ 175:App/Src/protocol.c **** 
+ 349              		.loc 1 175 5 is_stmt 1 view .LVU90
+ 177:App/Src/protocol.c ****     {
+ 350              		.loc 1 177 5 view .LVU91
+ 177:App/Src/protocol.c ****     {
+ 351              		.loc 1 177 8 is_stmt 0 view .LVU92
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 12
+
+
+ 352 0012 0028     		cmp	r0, #0
+ 353 0014 03D1     		bne	.L26
+ 182:App/Src/protocol.c **** 
+ 354              		.loc 1 182 5 is_stmt 1 view .LVU93
+ 355 0016 FFF7FEFF 		bl	HAL_FLASH_Lock
+ 356              	.LVL35:
+ 184:App/Src/protocol.c **** }
+ 357              		.loc 1 184 5 view .LVU94
+ 184:App/Src/protocol.c **** }
+ 358              		.loc 1 184 22 is_stmt 0 discriminator 4 view .LVU95
+ 359 001a 0020     		movs	r0, #0
+ 360              	.LVL36:
+ 361              	.L27:
+ 185:App/Src/protocol.c **** static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length)
+ 362              		.loc 1 185 1 view .LVU96
+ 363              		@ sp needed
+ 364              	.LVL37:
+ 365              	.LVL38:
+ 185:App/Src/protocol.c **** static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length)
+ 366              		.loc 1 185 1 view .LVU97
+ 367 001c 70BD     		pop	{r4, r5, r6, pc}
+ 368              	.LVL39:
+ 369              	.L26:
+ 179:App/Src/protocol.c ****     }
+ 370              		.loc 1 179 9 is_stmt 1 view .LVU98
+ 179:App/Src/protocol.c ****     }
+ 371              		.loc 1 179 20 is_stmt 0 view .LVU99
+ 372 001e 3200     		movs	r2, r6
+ 373 0020 2900     		movs	r1, r5
+ 374 0022 2000     		movs	r0, r4
+ 375              	.LVL40:
+ 179:App/Src/protocol.c ****     }
+ 376              		.loc 1 179 20 view .LVU100
+ 377 0024 FFF7FEFF 		bl	Flash_ProgramData
+ 378              	.LVL41:
+ 379 0028 0400     		movs	r4, r0
+ 380              	.LVL42:
+ 182:App/Src/protocol.c **** 
+ 381              		.loc 1 182 5 is_stmt 1 view .LVU101
+ 382 002a FFF7FEFF 		bl	HAL_FLASH_Lock
+ 383              	.LVL43:
+ 184:App/Src/protocol.c **** }
+ 384              		.loc 1 184 5 view .LVU102
+ 184:App/Src/protocol.c **** }
+ 385              		.loc 1 184 22 is_stmt 0 discriminator 1 view .LVU103
+ 386 002e 002C     		cmp	r4, #0
+ 387 0030 01D0     		beq	.L28
+ 184:App/Src/protocol.c **** }
+ 388              		.loc 1 184 22 discriminator 3 view .LVU104
+ 389 0032 0120     		movs	r0, #1
+ 390 0034 F2E7     		b	.L27
+ 391              	.L28:
+ 184:App/Src/protocol.c **** }
+ 392              		.loc 1 184 22 discriminator 4 view .LVU105
+ 393 0036 0020     		movs	r0, #0
+ 394 0038 F0E7     		b	.L27
+ 395              		.cfi_endproc
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 13
+
+
+ 396              	.LFE379:
+ 398              		.section	.text.Protocol_Init,"ax",%progbits
+ 399              		.align	1
+ 400              		.global	Protocol_Init
+ 401              		.syntax unified
+ 402              		.code	16
+ 403              		.thumb_func
+ 405              	Protocol_Init:
+ 406              	.LFB370:
+  24:App/Src/protocol.c **** 	protocol_state = PROTOCOL_STATE_IDLE;
+ 407              		.loc 1 24 1 is_stmt 1 view -0
+ 408              		.cfi_startproc
+ 409              		@ args = 0, pretend = 0, frame = 0
+ 410              		@ frame_needed = 0, uses_anonymous_args = 0
+ 411              		@ link register save eliminated.
+  25:App/Src/protocol.c **** 	packet_size = 0;
+ 412              		.loc 1 25 2 view .LVU107
+  25:App/Src/protocol.c **** 	packet_size = 0;
+ 413              		.loc 1 25 17 is_stmt 0 view .LVU108
+ 414 0000 084A     		ldr	r2, .L30
+ 415 0002 0023     		movs	r3, #0
+ 416 0004 1370     		strb	r3, [r2]
+  26:App/Src/protocol.c **** 	rx_buffer_filled = 0;
+ 417              		.loc 1 26 2 is_stmt 1 view .LVU109
+  26:App/Src/protocol.c **** 	rx_buffer_filled = 0;
+ 418              		.loc 1 26 14 is_stmt 0 view .LVU110
+ 419 0006 084A     		ldr	r2, .L30+4
+ 420 0008 1380     		strh	r3, [r2]
+  27:App/Src/protocol.c **** 	expected_bytes = 1;
+ 421              		.loc 1 27 2 is_stmt 1 view .LVU111
+  27:App/Src/protocol.c **** 	expected_bytes = 1;
+ 422              		.loc 1 27 19 is_stmt 0 view .LVU112
+ 423 000a 084A     		ldr	r2, .L30+8
+ 424 000c 1360     		str	r3, [r2]
+  28:App/Src/protocol.c **** 	current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+ 425              		.loc 1 28 2 is_stmt 1 view .LVU113
+  28:App/Src/protocol.c **** 	current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+ 426              		.loc 1 28 17 is_stmt 0 view .LVU114
+ 427 000e 084B     		ldr	r3, .L30+12
+ 428 0010 0122     		movs	r2, #1
+ 429 0012 1A60     		str	r2, [r3]
+  29:App/Src/protocol.c **** 	last_erased_page = 0xFFFFFFFF;
+ 430              		.loc 1 29 2 is_stmt 1 view .LVU115
+  29:App/Src/protocol.c **** 	last_erased_page = 0xFFFFFFFF;
+ 431              		.loc 1 29 23 is_stmt 0 view .LVU116
+ 432 0014 074B     		ldr	r3, .L30+16
+ 433 0016 084A     		ldr	r2, .L30+20
+ 434 0018 1A60     		str	r2, [r3]
+  30:App/Src/protocol.c **** }
+ 435              		.loc 1 30 2 is_stmt 1 view .LVU117
+  30:App/Src/protocol.c **** }
+ 436              		.loc 1 30 19 is_stmt 0 view .LVU118
+ 437 001a 084B     		ldr	r3, .L30+24
+ 438 001c 0122     		movs	r2, #1
+ 439 001e 5242     		rsbs	r2, r2, #0
+ 440 0020 1A60     		str	r2, [r3]
+  31:App/Src/protocol.c **** 
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 14
+
+
+ 441              		.loc 1 31 1 view .LVU119
+ 442              		@ sp needed
+ 443 0022 7047     		bx	lr
+ 444              	.L31:
+ 445              		.align	2
+ 446              	.L30:
+ 447 0024 00000000 		.word	protocol_state
+ 448 0028 00000000 		.word	packet_size
+ 449 002c 00000000 		.word	rx_buffer_filled
+ 450 0030 00000000 		.word	expected_bytes
+ 451 0034 00000000 		.word	current_flash_offset
+ 452 0038 00800008 		.word	134250496
+ 453 003c 00000000 		.word	last_erased_page
+ 454              		.cfi_endproc
+ 455              	.LFE370:
+ 457              		.section	.text.SetPacketSize,"ax",%progbits
+ 458              		.align	1
+ 459              		.global	SetPacketSize
+ 460              		.syntax unified
+ 461              		.code	16
+ 462              		.thumb_func
+ 464              	SetPacketSize:
+ 465              	.LFB373:
+  86:App/Src/protocol.c **** 	packet_size = PACKET_SIZE;
+ 466              		.loc 1 86 1 is_stmt 1 view -0
+ 467              		.cfi_startproc
+ 468              		@ args = 0, pretend = 0, frame = 0
+ 469              		@ frame_needed = 0, uses_anonymous_args = 0
+ 470              		@ link register save eliminated.
+  87:App/Src/protocol.c **** 	return true;
+ 471              		.loc 1 87 2 view .LVU121
+  87:App/Src/protocol.c **** 	return true;
+ 472              		.loc 1 87 14 is_stmt 0 view .LVU122
+ 473 0000 024B     		ldr	r3, .L33
+ 474 0002 8022     		movs	r2, #128
+ 475 0004 5200     		lsls	r2, r2, #1
+ 476 0006 1A80     		strh	r2, [r3]
+  88:App/Src/protocol.c **** }
+ 477              		.loc 1 88 2 is_stmt 1 view .LVU123
+  89:App/Src/protocol.c **** bool StartTransfer()
+ 478              		.loc 1 89 1 is_stmt 0 view .LVU124
+ 479 0008 0120     		movs	r0, #1
+ 480              		@ sp needed
+ 481 000a 7047     		bx	lr
+ 482              	.L34:
+ 483              		.align	2
+ 484              	.L33:
+ 485 000c 00000000 		.word	packet_size
+ 486              		.cfi_endproc
+ 487              	.LFE373:
+ 489              		.section	.text.StartTransfer,"ax",%progbits
+ 490              		.align	1
+ 491              		.global	StartTransfer
+ 492              		.syntax unified
+ 493              		.code	16
+ 494              		.thumb_func
+ 496              	StartTransfer:
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 15
+
+
+ 497              	.LFB374:
+  91:App/Src/protocol.c **** 	protocol_state = PROTOCOL_STATE_RECEIVING_DATA;
+ 498              		.loc 1 91 1 is_stmt 1 view -0
+ 499              		.cfi_startproc
+ 500              		@ args = 0, pretend = 0, frame = 0
+ 501              		@ frame_needed = 0, uses_anonymous_args = 0
+ 502              		@ link register save eliminated.
+  92:App/Src/protocol.c **** 	return true;
+ 503              		.loc 1 92 2 view .LVU126
+  92:App/Src/protocol.c **** 	return true;
+ 504              		.loc 1 92 17 is_stmt 0 view .LVU127
+ 505 0000 024B     		ldr	r3, .L36
+ 506 0002 0222     		movs	r2, #2
+ 507 0004 1A70     		strb	r2, [r3]
+  93:App/Src/protocol.c **** }
+ 508              		.loc 1 93 2 is_stmt 1 view .LVU128
+  94:App/Src/protocol.c **** bool CheckCRC()
+ 509              		.loc 1 94 1 is_stmt 0 view .LVU129
+ 510 0006 0120     		movs	r0, #1
+ 511              		@ sp needed
+ 512 0008 7047     		bx	lr
+ 513              	.L37:
+ 514 000a C046     		.align	2
+ 515              	.L36:
+ 516 000c 00000000 		.word	protocol_state
+ 517              		.cfi_endproc
+ 518              	.LFE374:
+ 520              		.section	.rodata.CheckCRC.str1.4,"aMS",%progbits,1
+ 521              		.align	2
+ 522              	.LC12:
+ 523 0000 43524320 		.ascii	"CRC POGRESAN! primljen=0x%04X, izracunat=0x%04X\015"
+ 523      504F4752 
+ 523      4553414E 
+ 523      21207072 
+ 523      696D6C6A 
+ 524 0030 0A00     		.ascii	"\012\000"
+ 525 0032 0000     		.align	2
+ 526              	.LC15:
+ 527 0034 466C6173 		.ascii	"Flash write GRESKA!\015\000"
+ 527      68207772 
+ 527      69746520 
+ 527      47524553 
+ 527      4B41210D 
+ 528              		.section	.text.CheckCRC,"ax",%progbits
+ 529              		.align	1
+ 530              		.global	CheckCRC
+ 531              		.syntax unified
+ 532              		.code	16
+ 533              		.thumb_func
+ 535              	CheckCRC:
+ 536              	.LFB375:
+  96:App/Src/protocol.c **** 	if(expected_bytes == 1)
+ 537              		.loc 1 96 1 is_stmt 1 view -0
+ 538              		.cfi_startproc
+ 539              		@ args = 0, pretend = 0, frame = 0
+ 540              		@ frame_needed = 0, uses_anonymous_args = 0
+ 541 0000 10B5     		push	{r4, lr}
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 16
+
+
+ 542              	.LCFI6:
+ 543              		.cfi_def_cfa_offset 8
+ 544              		.cfi_offset 4, -8
+ 545              		.cfi_offset 14, -4
+  97:App/Src/protocol.c **** 	{
+ 546              		.loc 1 97 2 view .LVU131
+  97:App/Src/protocol.c **** 	{
+ 547              		.loc 1 97 20 is_stmt 0 view .LVU132
+ 548 0002 1A4B     		ldr	r3, .L44
+ 549 0004 1B68     		ldr	r3, [r3]
+  97:App/Src/protocol.c **** 	{
+ 550              		.loc 1 97 4 view .LVU133
+ 551 0006 012B     		cmp	r3, #1
+ 552 0008 15D0     		beq	.L43
+ 102:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 553              		.loc 1 102 2 is_stmt 1 view .LVU134
+ 102:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 554              		.loc 1 102 46 is_stmt 0 view .LVU135
+ 555 000a 1948     		ldr	r0, .L44+4
+ 556 000c 0223     		movs	r3, #2
+ 557 000e FF33     		adds	r3, r3, #255
+ 558 0010 C45C     		ldrb	r4, [r0, r3]
+ 102:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 559              		.loc 1 102 76 view .LVU136
+ 560 0012 0133     		adds	r3, r3, #1
+ 561 0014 C35C     		ldrb	r3, [r0, r3]
+ 102:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 562              		.loc 1 102 64 view .LVU137
+ 563 0016 1B02     		lsls	r3, r3, #8
+ 102:App/Src/protocol.c **** 	uint16_t calculated_crc = CalculateChecksum(&rx_buffer[1], PACKET_SIZE);
+ 564              		.loc 1 102 11 view .LVU138
+ 565 0018 1C43     		orrs	r4, r3
+ 566              	.LVL44:
+ 103:App/Src/protocol.c **** 
+ 567              		.loc 1 103 2 is_stmt 1 view .LVU139
+ 103:App/Src/protocol.c **** 
+ 568              		.loc 1 103 28 is_stmt 0 view .LVU140
+ 569 001a 8021     		movs	r1, #128
+ 570 001c 0130     		adds	r0, r0, #1
+ 571 001e 4900     		lsls	r1, r1, #1
+ 572 0020 FFF7FEFF 		bl	CalculateChecksum
+ 573              	.LVL45:
+ 574 0024 0200     		movs	r2, r0
+ 575              	.LVL46:
+ 105:App/Src/protocol.c **** 	{
+ 576              		.loc 1 105 2 is_stmt 1 view .LVU141
+ 105:App/Src/protocol.c **** 	{
+ 577              		.loc 1 105 5 is_stmt 0 view .LVU142
+ 578 0026 8442     		cmp	r4, r0
+ 579 0028 0BD0     		beq	.L41
+ 107:App/Src/protocol.c **** 	  /* NE piši u flash, NE pomiči offset - blok je oštećen */
+ 580              		.loc 1 107 4 is_stmt 1 view .LVU143
+ 581 002a 1248     		ldr	r0, .L44+8
+ 582              	.LVL47:
+ 107:App/Src/protocol.c **** 	  /* NE piši u flash, NE pomiči offset - blok je oštećen */
+ 583              		.loc 1 107 4 is_stmt 0 view .LVU144
+ 584 002c 2100     		movs	r1, r4
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 17
+
+
+ 585 002e FFF7FEFF 		bl	printf
+ 586              	.LVL48:
+ 109:App/Src/protocol.c **** 	}
+ 587              		.loc 1 109 4 is_stmt 1 view .LVU145
+ 109:App/Src/protocol.c **** 	}
+ 588              		.loc 1 109 11 is_stmt 0 view .LVU146
+ 589 0032 0120     		movs	r0, #1
+ 590              	.LVL49:
+ 591              	.L40:
+ 122:App/Src/protocol.c **** bool EndTransfer()
+ 592              		.loc 1 122 1 view .LVU147
+ 593              		@ sp needed
+ 594 0034 10BD     		pop	{r4, pc}
+ 595              	.L43:
+  99:App/Src/protocol.c **** 	  return false;
+ 596              		.loc 1 99 4 is_stmt 1 view .LVU148
+  99:App/Src/protocol.c **** 	  return false;
+ 597              		.loc 1 99 19 is_stmt 0 view .LVU149
+ 598 0036 0D4B     		ldr	r3, .L44
+ 599 0038 0422     		movs	r2, #4
+ 600 003a FF32     		adds	r2, r2, #255
+ 601 003c 1A60     		str	r2, [r3]
+ 100:App/Src/protocol.c **** 	}
+ 602              		.loc 1 100 4 is_stmt 1 view .LVU150
+ 100:App/Src/protocol.c **** 	}
+ 603              		.loc 1 100 11 is_stmt 0 view .LVU151
+ 604 003e 0020     		movs	r0, #0
+ 605 0040 F8E7     		b	.L40
+ 606              	.LVL50:
+ 607              	.L41:
+ 112:App/Src/protocol.c **** 	{
+ 608              		.loc 1 112 2 is_stmt 1 view .LVU152
+ 112:App/Src/protocol.c **** 	{
+ 609              		.loc 1 112 6 is_stmt 0 view .LVU153
+ 610 0042 8022     		movs	r2, #128
+ 611 0044 0C49     		ldr	r1, .L44+12
+ 612 0046 0D4B     		ldr	r3, .L44+16
+ 613 0048 1868     		ldr	r0, [r3]
+ 614              	.LVL51:
+ 112:App/Src/protocol.c **** 	{
+ 615              		.loc 1 112 6 view .LVU154
+ 616 004a 5200     		lsls	r2, r2, #1
+ 617 004c FFF7FEFF 		bl	Flash_WriteBlock
+ 618              	.LVL52:
+ 112:App/Src/protocol.c **** 	{
+ 619              		.loc 1 112 5 discriminator 1 view .LVU155
+ 620 0050 0028     		cmp	r0, #0
+ 621 0052 05D0     		beq	.L42
+ 114:App/Src/protocol.c **** 	}
+ 622              		.loc 1 114 4 is_stmt 1 view .LVU156
+ 114:App/Src/protocol.c **** 	}
+ 623              		.loc 1 114 25 is_stmt 0 view .LVU157
+ 624 0054 094A     		ldr	r2, .L44+16
+ 625 0056 1368     		ldr	r3, [r2]
+ 626 0058 0133     		adds	r3, r3, #1
+ 627 005a FF33     		adds	r3, r3, #255
+ 628 005c 1360     		str	r3, [r2]
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 18
+
+
+ 629 005e E9E7     		b	.L40
+ 630              	.L42:
+ 118:App/Src/protocol.c **** 	}
+ 631              		.loc 1 118 4 is_stmt 1 view .LVU158
+ 632 0060 0748     		ldr	r0, .L44+20
+ 633 0062 FFF7FEFF 		bl	puts
+ 634              	.LVL53:
+ 121:App/Src/protocol.c **** }
+ 635              		.loc 1 121 9 is_stmt 0 view .LVU159
+ 636 0066 0120     		movs	r0, #1
+ 637 0068 E4E7     		b	.L40
+ 638              	.L45:
+ 639 006a C046     		.align	2
+ 640              	.L44:
+ 641 006c 00000000 		.word	expected_bytes
+ 642 0070 00000000 		.word	rx_buffer
+ 643 0074 00000000 		.word	.LC12
+ 644 0078 01000000 		.word	rx_buffer+1
+ 645 007c 00000000 		.word	current_flash_offset
+ 646 0080 34000000 		.word	.LC15
+ 647              		.cfi_endproc
+ 648              	.LFE375:
+ 650              		.section	.text.EndTransfer,"ax",%progbits
+ 651              		.align	1
+ 652              		.global	EndTransfer
+ 653              		.syntax unified
+ 654              		.code	16
+ 655              		.thumb_func
+ 657              	EndTransfer:
+ 658              	.LFB376:
+ 124:App/Src/protocol.c **** 	Bootloader_JumpToApplication();
+ 659              		.loc 1 124 1 is_stmt 1 view -0
+ 660              		.cfi_startproc
+ 661              		@ args = 0, pretend = 0, frame = 0
+ 662              		@ frame_needed = 0, uses_anonymous_args = 0
+ 663 0000 10B5     		push	{r4, lr}
+ 664              	.LCFI7:
+ 665              		.cfi_def_cfa_offset 8
+ 666              		.cfi_offset 4, -8
+ 667              		.cfi_offset 14, -4
+ 125:App/Src/protocol.c **** 	return true;
+ 668              		.loc 1 125 2 view .LVU161
+ 669 0002 FFF7FEFF 		bl	Bootloader_JumpToApplication
+ 670              	.LVL54:
+ 126:App/Src/protocol.c **** }
+ 671              		.loc 1 126 2 view .LVU162
+ 127:App/Src/protocol.c **** 
+ 672              		.loc 1 127 1 is_stmt 0 view .LVU163
+ 673 0006 0120     		movs	r0, #1
+ 674              		@ sp needed
+ 675 0008 10BD     		pop	{r4, pc}
+ 676              		.cfi_endproc
+ 677              	.LFE376:
+ 679              		.section	.rodata.ProcessCompleteMessage.str1.4,"aMS",%progbits,1
+ 680              		.align	2
+ 681              	.LC18:
+ 682 0000 4E65706F 		.ascii	"Nepoznata komanda: 0x%02X\015\012\000"
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 19
+
+
+ 682      7A6E6174 
+ 682      61206B6F 
+ 682      6D616E64 
+ 682      613A2030 
+ 683              		.section	.text.ProcessCompleteMessage,"ax",%progbits
+ 684              		.align	1
+ 685              		.syntax unified
+ 686              		.code	16
+ 687              		.thumb_func
+ 689              	ProcessCompleteMessage:
+ 690              	.LFB372:
+  52:App/Src/protocol.c ****     uint8_t cmd = rx_buffer[0];
+ 691              		.loc 1 52 1 is_stmt 1 view -0
+ 692              		.cfi_startproc
+ 693              		@ args = 0, pretend = 0, frame = 0
+ 694              		@ frame_needed = 0, uses_anonymous_args = 0
+ 695 0000 10B5     		push	{r4, lr}
+ 696              	.LCFI8:
+ 697              		.cfi_def_cfa_offset 8
+ 698              		.cfi_offset 4, -8
+ 699              		.cfi_offset 14, -4
+  53:App/Src/protocol.c ****     bool complete = true;
+ 700              		.loc 1 53 5 view .LVU165
+  53:App/Src/protocol.c ****     bool complete = true;
+ 701              		.loc 1 53 13 is_stmt 0 view .LVU166
+ 702 0002 114B     		ldr	r3, .L57
+ 703 0004 1978     		ldrb	r1, [r3]
+ 704              	.LVL55:
+  54:App/Src/protocol.c **** 
+ 705              		.loc 1 54 5 is_stmt 1 view .LVU167
+  56:App/Src/protocol.c ****     {
+ 706              		.loc 1 56 5 view .LVU168
+ 707 0006 0329     		cmp	r1, #3
+ 708 0008 17D0     		beq	.L48
+ 709 000a 06D8     		bhi	.L49
+ 710 000c 0129     		cmp	r1, #1
+ 711 000e 09D0     		beq	.L50
+ 712 0010 0229     		cmp	r1, #2
+ 713 0012 15D1     		bne	.L52
+  63:App/Src/protocol.c ****         break;
+ 714              		.loc 1 63 9 view .LVU169
+  63:App/Src/protocol.c ****         break;
+ 715              		.loc 1 63 20 is_stmt 0 view .LVU170
+ 716 0014 FFF7FEFF 		bl	StartTransfer
+ 717              	.LVL56:
+  64:App/Src/protocol.c **** 
+ 718              		.loc 1 64 9 is_stmt 1 view .LVU171
+ 719 0018 06E0     		b	.L54
+ 720              	.LVL57:
+ 721              	.L49:
+  56:App/Src/protocol.c ****     {
+ 722              		.loc 1 56 5 is_stmt 0 view .LVU172
+ 723 001a 0429     		cmp	r1, #4
+ 724 001c 10D1     		bne	.L52
+  71:App/Src/protocol.c ****         break;
+ 725              		.loc 1 71 9 is_stmt 1 view .LVU173
+  71:App/Src/protocol.c ****         break;
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 20
+
+
+ 726              		.loc 1 71 20 is_stmt 0 view .LVU174
+ 727 001e FFF7FEFF 		bl	EndTransfer
+ 728              	.LVL58:
+  72:App/Src/protocol.c **** 
+ 729              		.loc 1 72 9 is_stmt 1 view .LVU175
+ 730 0022 01E0     		b	.L54
+ 731              	.LVL59:
+ 732              	.L50:
+  59:App/Src/protocol.c ****     	break;
+ 733              		.loc 1 59 6 view .LVU176
+  59:App/Src/protocol.c ****     	break;
+ 734              		.loc 1 59 17 is_stmt 0 view .LVU177
+ 735 0024 FFF7FEFF 		bl	SetPacketSize
+ 736              	.LVL60:
+  60:App/Src/protocol.c **** 
+ 737              		.loc 1 60 6 is_stmt 1 view .LVU178
+ 738              	.L54:
+  78:App/Src/protocol.c **** 	{
+ 739              		.loc 1 78 5 view .LVU179
+  78:App/Src/protocol.c **** 	{
+ 740              		.loc 1 78 8 is_stmt 0 view .LVU180
+ 741 0028 0028     		cmp	r0, #0
+ 742 002a 05D0     		beq	.L47
+ 743              	.LVL61:
+ 744              	.L55:
+  80:App/Src/protocol.c **** 	  expected_bytes = 1;
+ 745              		.loc 1 80 4 is_stmt 1 view .LVU181
+  80:App/Src/protocol.c **** 	  expected_bytes = 1;
+ 746              		.loc 1 80 21 is_stmt 0 view .LVU182
+ 747 002c 074B     		ldr	r3, .L57+4
+ 748 002e 0022     		movs	r2, #0
+ 749 0030 1A60     		str	r2, [r3]
+  81:App/Src/protocol.c **** 	}
+ 750              		.loc 1 81 4 is_stmt 1 view .LVU183
+  81:App/Src/protocol.c **** 	}
+ 751              		.loc 1 81 19 is_stmt 0 view .LVU184
+ 752 0032 074B     		ldr	r3, .L57+8
+ 753 0034 0132     		adds	r2, r2, #1
+ 754 0036 1A60     		str	r2, [r3]
+ 755              	.L47:
+  83:App/Src/protocol.c **** 
+ 756              		.loc 1 83 1 view .LVU185
+ 757              		@ sp needed
+ 758 0038 10BD     		pop	{r4, pc}
+ 759              	.LVL62:
+ 760              	.L48:
+  67:App/Src/protocol.c ****         break;
+ 761              		.loc 1 67 6 is_stmt 1 view .LVU186
+  67:App/Src/protocol.c ****         break;
+ 762              		.loc 1 67 17 is_stmt 0 view .LVU187
+ 763 003a FFF7FEFF 		bl	CheckCRC
+ 764              	.LVL63:
+  68:App/Src/protocol.c **** 
+ 765              		.loc 1 68 9 is_stmt 1 view .LVU188
+ 766 003e F3E7     		b	.L54
+ 767              	.LVL64:
+ 768              	.L52:
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 21
+
+
+  75:App/Src/protocol.c ****         break;
+ 769              		.loc 1 75 9 view .LVU189
+ 770 0040 0448     		ldr	r0, .L57+12
+ 771 0042 FFF7FEFF 		bl	printf
+ 772              	.LVL65:
+  76:App/Src/protocol.c ****     }
+ 773              		.loc 1 76 9 view .LVU190
+  78:App/Src/protocol.c **** 	{
+ 774              		.loc 1 78 5 view .LVU191
+ 775 0046 F1E7     		b	.L55
+ 776              	.L58:
+ 777              		.align	2
+ 778              	.L57:
+ 779 0048 00000000 		.word	rx_buffer
+ 780 004c 00000000 		.word	rx_buffer_filled
+ 781 0050 00000000 		.word	expected_bytes
+ 782 0054 00000000 		.word	.LC18
+ 783              		.cfi_endproc
+ 784              	.LFE372:
+ 786              		.section	.text.Protocol_ProcessByte,"ax",%progbits
+ 787              		.align	1
+ 788              		.global	Protocol_ProcessByte
+ 789              		.syntax unified
+ 790              		.code	16
+ 791              		.thumb_func
+ 793              	Protocol_ProcessByte:
+ 794              	.LVL66:
+ 795              	.LFB371:
+  36:App/Src/protocol.c ****     for (uint32_t i = 0; i < len; i++)
+ 796              		.loc 1 36 1 view -0
+ 797              		.cfi_startproc
+ 798              		@ args = 0, pretend = 0, frame = 0
+ 799              		@ frame_needed = 0, uses_anonymous_args = 0
+  36:App/Src/protocol.c ****     for (uint32_t i = 0; i < len; i++)
+ 800              		.loc 1 36 1 is_stmt 0 view .LVU193
+ 801 0000 70B5     		push	{r4, r5, r6, lr}
+ 802              	.LCFI9:
+ 803              		.cfi_def_cfa_offset 16
+ 804              		.cfi_offset 4, -16
+ 805              		.cfi_offset 5, -12
+ 806              		.cfi_offset 6, -8
+ 807              		.cfi_offset 14, -4
+ 808 0002 0600     		movs	r6, r0
+ 809 0004 0D00     		movs	r5, r1
+  37:App/Src/protocol.c ****     {
+ 810              		.loc 1 37 5 is_stmt 1 view .LVU194
+ 811              	.LBB8:
+  37:App/Src/protocol.c ****     {
+ 812              		.loc 1 37 10 view .LVU195
+ 813              	.LVL67:
+  37:App/Src/protocol.c ****     {
+ 814              		.loc 1 37 19 is_stmt 0 view .LVU196
+ 815 0006 0024     		movs	r4, #0
+  37:App/Src/protocol.c ****     {
+ 816              		.loc 1 37 5 view .LVU197
+ 817 0008 06E0     		b	.L60
+ 818              	.LVL68:
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 22
+
+
+ 819              	.L61:
+  44:App/Src/protocol.c ****         {
+ 820              		.loc 1 44 9 is_stmt 1 view .LVU198
+  44:App/Src/protocol.c ****         {
+ 821              		.loc 1 44 30 is_stmt 0 view .LVU199
+ 822 000a 0D4B     		ldr	r3, .L66
+ 823 000c 1A68     		ldr	r2, [r3]
+ 824 000e 0D4B     		ldr	r3, .L66+4
+ 825 0010 1B68     		ldr	r3, [r3]
+  44:App/Src/protocol.c ****         {
+ 826              		.loc 1 44 12 view .LVU200
+ 827 0012 9A42     		cmp	r2, r3
+ 828 0014 0FD0     		beq	.L64
+ 829              	.L62:
+  37:App/Src/protocol.c ****     {
+ 830              		.loc 1 37 36 is_stmt 1 discriminator 2 view .LVU201
+ 831 0016 0134     		adds	r4, r4, #1
+ 832              	.LVL69:
+ 833              	.L60:
+  37:App/Src/protocol.c ****     {
+ 834              		.loc 1 37 28 discriminator 1 view .LVU202
+ 835 0018 AC42     		cmp	r4, r5
+ 836 001a 0FD2     		bcs	.L65
+  39:App/Src/protocol.c ****         {
+ 837              		.loc 1 39 9 view .LVU203
+  39:App/Src/protocol.c ****         {
+ 838              		.loc 1 39 30 is_stmt 0 view .LVU204
+ 839 001c 084B     		ldr	r3, .L66
+ 840 001e 1B68     		ldr	r3, [r3]
+  39:App/Src/protocol.c ****         {
+ 841              		.loc 1 39 12 view .LVU205
+ 842 0020 8222     		movs	r2, #130
+ 843 0022 5200     		lsls	r2, r2, #1
+ 844 0024 9342     		cmp	r3, r2
+ 845 0026 F0D2     		bcs	.L61
+  41:App/Src/protocol.c ****         }
+ 846              		.loc 1 41 13 is_stmt 1 view .LVU206
+  41:App/Src/protocol.c ****         }
+ 847              		.loc 1 41 39 is_stmt 0 view .LVU207
+ 848 0028 054A     		ldr	r2, .L66
+ 849 002a 591C     		adds	r1, r3, #1
+ 850 002c 1160     		str	r1, [r2]
+  41:App/Src/protocol.c ****         }
+ 851              		.loc 1 41 49 view .LVU208
+ 852 002e 315D     		ldrb	r1, [r6, r4]
+  41:App/Src/protocol.c ****         }
+ 853              		.loc 1 41 43 view .LVU209
+ 854 0030 054A     		ldr	r2, .L66+8
+ 855 0032 D154     		strb	r1, [r2, r3]
+ 856 0034 E9E7     		b	.L61
+ 857              	.L64:
+  46:App/Src/protocol.c ****         }
+ 858              		.loc 1 46 13 is_stmt 1 view .LVU210
+ 859 0036 FFF7FEFF 		bl	ProcessCompleteMessage
+ 860              	.LVL70:
+ 861 003a ECE7     		b	.L62
+ 862              	.L65:
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 23
+
+
+ 863              	.LBE8:
+  49:App/Src/protocol.c **** 
+ 864              		.loc 1 49 1 is_stmt 0 view .LVU211
+ 865              		@ sp needed
+ 866              	.LVL71:
+ 867              	.LVL72:
+ 868              	.LVL73:
+  49:App/Src/protocol.c **** 
+ 869              		.loc 1 49 1 view .LVU212
+ 870 003c 70BD     		pop	{r4, r5, r6, pc}
+ 871              	.L67:
+ 872 003e C046     		.align	2
+ 873              	.L66:
+ 874 0040 00000000 		.word	rx_buffer_filled
+ 875 0044 00000000 		.word	expected_bytes
+ 876 0048 00000000 		.word	rx_buffer
+ 877              		.cfi_endproc
+ 878              	.LFE371:
+ 880              		.section	.data.last_erased_page,"aw"
+ 881              		.align	2
+ 884              	last_erased_page:
+ 885 0000 FFFFFFFF 		.word	-1
+ 886              		.section	.data.current_flash_offset,"aw"
+ 887              		.align	2
+ 890              	current_flash_offset:
+ 891 0000 00800008 		.word	134250496
+ 892              		.section	.data.expected_bytes,"aw"
+ 893              		.align	2
+ 896              	expected_bytes:
+ 897 0000 01000000 		.word	1
+ 898              		.section	.bss.rx_buffer_filled,"aw",%nobits
+ 899              		.align	2
+ 902              	rx_buffer_filled:
+ 903 0000 00000000 		.space	4
+ 904              		.section	.bss.rx_buffer,"aw",%nobits
+ 905              		.align	2
+ 908              	rx_buffer:
+ 909 0000 00000000 		.space	260
+ 909      00000000 
+ 909      00000000 
+ 909      00000000 
+ 909      00000000 
+ 910              		.section	.bss.packet_size,"aw",%nobits
+ 911              		.align	1
+ 914              	packet_size:
+ 915 0000 0000     		.space	2
+ 916              		.section	.bss.protocol_state,"aw",%nobits
+ 919              	protocol_state:
+ 920 0000 00       		.space	1
+ 921              		.text
+ 922              	.Letext0:
+ 923              		.file 2 "C:\\ST\\STM32CubeIDE_2.2.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltools
+ 924              		.file 3 "C:\\ST\\STM32CubeIDE_2.2.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltools
+ 925              		.file 4 "App/Inc/protocol.h"
+ 926              		.file 5 "Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_def.h"
+ 927              		.file 6 "Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_flash.h"
+ 928              		.file 7 "Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_ll_dma.h"
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 24
+
+
+ 929              		.file 8 "C:\\ST\\STM32CubeIDE_2.2.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltools
+ 930              		.file 9 "Drivers/STM32G0xx_HAL_Driver/Inc/stm32g0xx_hal_flash_ex.h"
+ 931              		.file 10 "C:\\ST\\STM32CubeIDE_2.2.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltool
+ 932              		.file 11 "<built-in>"
+ 933              		.file 12 "App/Inc/bootloader.h"
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 25
+
+
+DEFINED SYMBOLS
+                            *ABS*:00000000 protocol.c
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:19     .text.CalculateChecksum:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:24     .text.CalculateChecksum:00000000 CalculateChecksum
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:130    .text.CalculateChecksum:00000038 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:136    .text.Flash_ErasePage:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:141    .text.Flash_ErasePage:00000000 Flash_ErasePage
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:224    .text.Flash_ErasePage:0000003c $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:884    .data.last_erased_page:00000000 last_erased_page
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:229    .text.Flash_ProgramData:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:234    .text.Flash_ProgramData:00000000 Flash_ProgramData
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:318    .text.Flash_WriteBlock:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:323    .text.Flash_WriteBlock:00000000 Flash_WriteBlock
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:399    .text.Protocol_Init:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:405    .text.Protocol_Init:00000000 Protocol_Init
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:447    .text.Protocol_Init:00000024 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:919    .bss.protocol_state:00000000 protocol_state
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:914    .bss.packet_size:00000000 packet_size
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:902    .bss.rx_buffer_filled:00000000 rx_buffer_filled
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:896    .data.expected_bytes:00000000 expected_bytes
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:890    .data.current_flash_offset:00000000 current_flash_offset
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:458    .text.SetPacketSize:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:464    .text.SetPacketSize:00000000 SetPacketSize
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:485    .text.SetPacketSize:0000000c $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:490    .text.StartTransfer:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:496    .text.StartTransfer:00000000 StartTransfer
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:516    .text.StartTransfer:0000000c $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:521    .rodata.CheckCRC.str1.4:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:529    .text.CheckCRC:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:535    .text.CheckCRC:00000000 CheckCRC
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:641    .text.CheckCRC:0000006c $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:908    .bss.rx_buffer:00000000 rx_buffer
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:651    .text.EndTransfer:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:657    .text.EndTransfer:00000000 EndTransfer
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:680    .rodata.ProcessCompleteMessage.str1.4:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:684    .text.ProcessCompleteMessage:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:689    .text.ProcessCompleteMessage:00000000 ProcessCompleteMessage
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:779    .text.ProcessCompleteMessage:00000048 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:787    .text.Protocol_ProcessByte:00000000 $t
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:793    .text.Protocol_ProcessByte:00000000 Protocol_ProcessByte
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:874    .text.Protocol_ProcessByte:00000040 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:881    .data.last_erased_page:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:887    .data.current_flash_offset:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:893    .data.expected_bytes:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:899    .bss.rx_buffer_filled:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:905    .bss.rx_buffer:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:911    .bss.packet_size:00000000 $d
+C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s:920    .bss.protocol_state:00000000 $d
+
+UNDEFINED SYMBOLS
+HAL_FLASHEx_Erase
+memcpy
+HAL_FLASH_Program
+HAL_FLASH_Unlock
+HAL_FLASH_Lock
+printf
+puts
+ARM GAS  C:\Users\Domagoj\AppData\Local\Temp\cc2NYfZ6.s 			page 26
+
+
+Bootloader_JumpToApplication
