@@ -69,7 +69,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -94,7 +93,7 @@ int main(void)
   MX_USB_Device_Init();
   /* USER CODE BEGIN 2 */
   setvbuf(stdout, NULL, _IONBF, 0);
-  printf("\r\nMiniUpdater Bootloader v1.0\r\n");
+  printf("\r\nMiniUpdater Bootloader\r\n");
 
   Bootloader_CheckAndJump();
   Protocol_Init();
