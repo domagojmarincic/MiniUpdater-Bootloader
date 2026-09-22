@@ -16,19 +16,13 @@
 #define CRC_SIZE				 2U
 
 #define START_ADDRESS                0X08000000U
-#define PROTOCOL_APP_FLASH_ADDRESS   0x08008000U
-
-typedef enum {
-    PROTOCOL_STATE_IDLE = 0,
-    PROTOCOL_STATE_WAIT_PACKET_SIZE,
-    PROTOCOL_STATE_RECEIVING_DATA,
-} ProtocolState_t;
+#define APP_FLASH_ADDRESS   0x08008000U
 
 void Protocol_Init(void);
 void Protocol_ProcessByte(uint8_t *data, uint32_t len);
 bool SetPacketSize();
 bool StartTransfer();
-bool CheckCRC();
+bool HandleDataBlock();
 bool EndTransfer();
 
 #endif

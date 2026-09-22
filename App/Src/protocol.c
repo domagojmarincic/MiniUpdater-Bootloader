@@ -8,25 +8,25 @@
 static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length);
 static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length);
 static bool Flash_ErasePage(uint32_t address);
-static uint16_t CalculateChecksum();
+static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length);
+static void Send_ACK(void);
+static void Send_NACK(void);
 
-static ProtocolState_t protocol_state = PROTOCOL_STATE_IDLE;
 static uint16_t packet_size = 0;
 
-static uint8_t rx_buffer[PACKET_SIZE + 4];
+static uint8_t rx_buffer[CMD_SIZE + PACKET_SIZE + CRC_SIZE];
 static uint32_t rx_buffer_filled = 0;
 static uint32_t expected_bytes = 1;
 
-static uint32_t current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+static uint32_t current_flash_offset = APP_FLASH_ADDRESS;
 static uint32_t last_erased_page = 0xFFFFFFFF;
 
 void Protocol_Init(void)
 {
-	protocol_state = PROTOCOL_STATE_IDLE;
 	packet_size = 0;
 	rx_buffer_filled = 0;
 	expected_bytes = 1;
-	current_flash_offset = PROTOCOL_APP_FLASH_ADDRESS;
+	current_flash_offset = APP_FLASH_ADDRESS;
 	last_erased_page = 0xFFFFFFFF;
 }
 
@@ -64,7 +64,7 @@ static void ProcessCompleteMessage(void)
         break;
 
     case CMD_DATA_BLOCK_WITH_CRC:
-    	complete = CheckCRC();
+    	complete = HandleDataBlock();
         break;
 
     case CMD_END_TRANSFER:
@@ -72,27 +72,30 @@ static void ProcessCompleteMessage(void)
         break;
 
     default:
-        printf("Nepoznata komanda: 0x%02X\r\n", cmd);
+        printf("Unknown command: 0x%02X\r\n", cmd);
         break;
     }
     if (complete)
 	{
-	  rx_buffer_filled = 0;
-	  expected_bytes = 1;
+		rx_buffer_filled = 0;
+		expected_bytes = 1;
 	}
 }
 
 bool SetPacketSize()
 {
 	packet_size = PACKET_SIZE;
+	printf("Packet size set");
+	Send_ACK();
+
 	return true;
 }
 bool StartTransfer()
 {
-	protocol_state = PROTOCOL_STATE_RECEIVING_DATA;
+	Send_ACK();
 	return true;
 }
-bool CheckCRC()
+bool HandleDataBlock()
 {
 	if(expected_bytes == 1)
 	{
@@ -104,25 +107,27 @@ bool CheckCRC()
 
 	if (received_crc != calculated_crc)
 	{
-	  printf("CRC POGRESAN! primljen=0x%04X, izracunat=0x%04X\r\n", received_crc, calculated_crc);
-	  /* NE piši u flash, NE pomiči offset - blok je oštećen */
-	  return true;   /* poruka JEST kompletna, samo je odbijena */
+		printf("CRC POGRESAN!\r\n");
+		Send_NACK();
+		return true;
 	}
 
 	if (Flash_WriteBlock(current_flash_offset, &rx_buffer[1], PACKET_SIZE))
 	{
 	  current_flash_offset += PACKET_SIZE;
+	  Send_ACK();
 	}
 	else
 	{
-	  printf("Flash write GRESKA!\r\n");
+		printf("Flash write GRESKA na adresi 0x%08lX!\r\n", (unsigned long)current_flash_offset);
+		Send_NACK();
 	}
 
 	return true;
 }
 bool EndTransfer()
 {
-	Bootloader_JumpToApplication();
+    Bootloader_JumpToApplication();
 	return true;
 }
 
@@ -141,12 +146,14 @@ static bool Flash_ErasePage(uint32_t address)
     erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
     erase_init.Page = current_page;
     erase_init.NbPages = 1;
+    erase_init.Banks = FLASH_BANK_1;
 
     if (HAL_FLASHEx_Erase(&erase_init, &page_error) != HAL_OK)
     {
-        return false;
+    	printf("Erase error! HAL_FLASH_GetError() = 0x%08lX, stranica=%lu\r\n",
+			   (unsigned long)HAL_FLASH_GetError(), (unsigned long)current_page);
+		return false;
     }
-
     last_erased_page = current_page;
     return true;
 }
@@ -160,6 +167,8 @@ static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t le
 
         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, doubleword) != HAL_OK)
         {
+        	printf("HAL_FLASH_GetError() = 0x%08lX, adresa=0x%08lX\r\n",
+        	                   (unsigned long)HAL_FLASH_GetError(), (unsigned long)(address + i));
             return false;
         }
     }
@@ -170,6 +179,15 @@ static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t le
 static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length)
 {
     HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PROGERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_WRPERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PGAERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SIZERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PGSERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_MISERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_FASTERR);
+	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPTVERR);
 
     bool erase_ok = Flash_ErasePage(address);
     bool write_ok = false;
@@ -205,4 +223,15 @@ static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length)
     }
 
     return crc;
+}
+static void Send_ACK(void)
+{
+    uint8_t ack = CMD_ACK;
+    CDC_Transmit_FS(&ack, 1);
+}
+
+static void Send_NACK(void)
+{
+    uint8_t nack = CMD_NACK;
+    CDC_Transmit_FS(&nack, 1);
 }
