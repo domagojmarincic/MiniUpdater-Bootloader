@@ -20,9 +20,5 @@
 
 void Protocol_Init(void);
 void Protocol_ProcessByte(uint8_t *data, uint32_t len);
-bool SetPacketSize();
-bool StartTransfer();
-bool HandleDataBlock();
-bool EndTransfer();
 
 #endif
