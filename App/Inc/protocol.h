@@ -16,7 +16,7 @@
 #define CRC_SIZE				 2U
 
 #define START_ADDRESS                0X08000000U
-#define APP_FLASH_ADDRESS   0x08008000U
+#define APP_FLASH_ADDRESS   0x0800C000U
 
 void Protocol_Init(void);
 void Protocol_ProcessByte(uint8_t *data, uint32_t len);

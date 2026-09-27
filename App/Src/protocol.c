@@ -1,14 +1,12 @@
 #include "protocol.h"
 #include "bootloader.h"
+#include "firmware_store.h"
 #include "usbd_cdc_if.h"
 #include <string.h>
 #include <stdio.h>
 #include "stm32g0xx_hal.h"
 
 static void ProcessCompleteMessage(void);
-static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length);
-static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length);
-static bool Flash_ErasePage(uint32_t address);
 static bool SetPacketSize();
 static bool StartTransfer();
 static bool HandleDataBlock();
@@ -21,16 +19,14 @@ static uint16_t packet_size = 0;
 static uint8_t rx_buffer[CMD_SIZE + PACKET_SIZE + CRC_SIZE];
 static uint32_t rx_buffer_filled = 0;
 static uint32_t expected_bytes = 1;
-static uint32_t current_flash_offset = APP_FLASH_ADDRESS;
-static uint32_t last_erased_page = 0xFFFFFFFF;
+static uint32_t current_flash_offset = 0;
 
 void Protocol_Init(void)
 {
 	packet_size = 0;
 	rx_buffer_filled = 0;
 	expected_bytes = 1;
-	current_flash_offset = APP_FLASH_ADDRESS;
-	last_erased_page = 0xFFFFFFFF;
+	current_flash_offset = 0;
 }
 
 void Protocol_ProcessByte(uint8_t *data, uint32_t len)
@@ -112,7 +108,7 @@ bool HandleDataBlock()
 		return true;
 	}
 
-	if (Flash_WriteBlock(current_flash_offset, &rx_buffer[1], PACKET_SIZE))
+	if (FirmwareStore_WriteBlock(current_flash_offset, &rx_buffer[1], PACKET_SIZE))
 	{
 	  current_flash_offset += PACKET_SIZE;
 	  Send_ACK();
@@ -127,79 +123,18 @@ bool HandleDataBlock()
 }
 bool EndTransfer()
 {
+	printf("Kopiram IZ vanjskog U unutarnji flash, ukupno %lu bajtova...\r\n",
+			(unsigned long)current_flash_offset);
+
+	if (!FirmwareStore_CopyToInternalFlash(current_flash_offset))
+	{
+		printf("Kopiranje GRESKA!\r\n");
+		return true;
+	}
+
+	printf("Kopiranje uspjesno, skacem na aplikaciju\r\n");
     Bootloader_JumpToApplication();
 	return true;
-}
-
-static bool Flash_WriteBlock(uint32_t address, const uint8_t *data, uint32_t length)
-{
-    HAL_FLASH_Unlock();
-    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PROGERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_WRPERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PGAERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_SIZERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_PGSERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_MISERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_FASTERR);
-	__HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_OPTVERR);
-
-    bool is_erased = Flash_ErasePage(address);
-    bool is_written = false;
-
-    if (erase_ok)
-    {
-        is_written = Flash_ProgramData(address, data, length);
-    }
-
-    HAL_FLASH_Lock();
-
-    return is_written;
-}
-
-static bool Flash_ErasePage(uint32_t address)
-{
-    uint32_t current_page = (address - START_ADDRESS) / FLASH_PAGE_SIZE;
-
-    if (current_page == last_erased_page)
-    {
-        return true;
-    }
-
-    FLASH_EraseInitTypeDef erase_init;
-    uint32_t page_error;
-
-    erase_init.TypeErase = FLASH_TYPEERASE_PAGES;
-    erase_init.Page = current_page;
-    erase_init.NbPages = 1;
-    erase_init.Banks = FLASH_BANK_1;
-
-    if (HAL_FLASHEx_Erase(&erase_init, &page_error) != HAL_OK)
-    {
-    	printf("Erase error! HAL_FLASH_GetError() = 0x%08lX, stranica=%lu\r\n",
-			   (unsigned long)HAL_FLASH_GetError(), (unsigned long)current_page);
-		return false;
-    }
-    last_erased_page = current_page;
-    return true;
-}
-
-static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length)
-{
-    for (uint32_t i = 0; i < length; i += 8)
-    {
-        uint64_t doubleword;
-        memcpy(&doubleword, &data[i], 8);
-
-        if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, doubleword) != HAL_OK)
-        {
-        	printf("HAL_FLASH_GetError() = 0x%08lX, adresa=0x%08lX\r\n",
-        	                   (unsigned long)HAL_FLASH_GetError(), (unsigned long)(address + i));
-            return false;
-        }
-    }
-
-    return true;
 }
 
 static uint16_t CalculateChecksum(const uint8_t *data, uint32_t length)
