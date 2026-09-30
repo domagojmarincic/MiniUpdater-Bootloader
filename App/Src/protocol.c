@@ -1,10 +1,10 @@
+#include <string.h>
+#include <stdio.h>
+#include "stm32g0xx_hal.h"
 #include "protocol.h"
 #include "bootloader.h"
 #include "firmware_store.h"
 #include "usbd_cdc_if.h"
-#include <string.h>
-#include <stdio.h>
-#include "stm32g0xx_hal.h"
 
 static void ProcessCompleteMessage(void);
 static bool SetPacketSize();
@@ -27,6 +27,7 @@ void Protocol_Init(void)
 	rx_buffer_filled = 0;
 	expected_bytes = 1;
 	current_flash_offset = 0;
+    FirmwareStore_Reset();
 }
 
 void Protocol_ProcessByte(uint8_t *data, uint32_t len)
@@ -82,7 +83,7 @@ static void ProcessCompleteMessage(void)
 bool SetPacketSize()
 {
 	packet_size = PACKET_SIZE;
-	printf("Packet size set");
+	printf("Packet size set\r\n");
 	Send_ACK();
 
 	return true;
@@ -123,16 +124,15 @@ bool HandleDataBlock()
 }
 bool EndTransfer()
 {
-	printf("Kopiram IZ vanjskog U unutarnji flash, ukupno %lu bajtova...\r\n",
-			(unsigned long)current_flash_offset);
+	printf("Copying to internal...\r\n");
 
 	if (!FirmwareStore_CopyToInternalFlash(current_flash_offset))
 	{
-		printf("Kopiranje GRESKA!\r\n");
+		printf("Copy error\r\n");
 		return true;
 	}
 
-	printf("Kopiranje uspjesno, skacem na aplikaciju\r\n");
+	printf("Copy successfull, jumping to application\r\n");
     Bootloader_JumpToApplication();
 	return true;
 }

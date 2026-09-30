@@ -19,8 +19,7 @@ void Bootloader_JumpToApplication(void)
 	  return;
     }
 
-    printf("Jumping on application\r\n",
-           (unsigned long)app_stack_pointer, (unsigned long)app_reset_handler);
+    printf("Jumping on application\r\n");
 
 	USBD_DeInit(&hUsbDeviceFS);
 	HAL_PCD_DeInit(&hpcd_USB_DRD_FS);

@@ -1,14 +1,14 @@
-#include "firmware_store.h"
-#include "spif.h"
-#include "stm32g0xx_hal.h"
 #include <string.h>
 #include <stdio.h>
+#include "stm32g0xx_hal.h"
+#include "firmware_store.h"
+#include "spif.h"
 
 extern spif_handle_t spif;
 
 #define EXTERNAL_STAGING_ADDRESS   0x00000000U
-#define INTERNAL_APP_ADDRESS        0x0800C000U
-#define INTERNAL_START_ADDRESS      0x08000000U
+#define APP_ADDRESS        0x0800C000U
+#define START_ADDRESS      0x08000000U
 
 static bool Flash_ErasePage(uint32_t address, uint32_t *last_erased_page);
 static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t length);
@@ -24,7 +24,7 @@ bool FirmwareStore_WriteBlock(uint32_t offset, const uint8_t *data, uint32_t len
     {
         if (!spif_erase_sector(&spif, sector))
         {
-            printf("Vanjski erase GRESKA, sektor=%lu\r\n", (unsigned long)sector);
+            printf("Erase error, sector=%lu\r\n", (unsigned long)sector);
             return false;
         }
         last_erased_external_sector = sector;
@@ -34,7 +34,7 @@ bool FirmwareStore_WriteBlock(uint32_t offset, const uint8_t *data, uint32_t len
 
     if (!spif_write_sector(&spif, sector, data, length, offset_in_sector))
     {
-        printf("Vanjski write GRESKA, sektor=%lu\r\n", (unsigned long)sector);
+        printf("Write error, sector=%lu\r\n", (unsigned long)sector);
         return false;
     }
 
@@ -64,12 +64,12 @@ bool FirmwareStore_CopyToInternalFlash(uint32_t total_size)
 
         if (!spif_read_address(&spif, EXTERNAL_STAGING_ADDRESS + copied, buffer, chunk))
         {
-            printf("Vanjski read GRESKA, offset=%lu\r\n", (unsigned long)copied);
+            printf("Read error, offset=%lu\r\n", (unsigned long)copied);
             HAL_FLASH_Lock();
             return false;
         }
 
-        uint32_t internal_address = INTERNAL_APP_ADDRESS + copied;
+        uint32_t internal_address = APP_ADDRESS + copied;
 
         if (!Flash_ErasePage(internal_address, &last_erased_page))
         {
@@ -90,9 +90,14 @@ bool FirmwareStore_CopyToInternalFlash(uint32_t total_size)
     return true;
 }
 
+void FirmwareStore_Reset(void)
+{
+    last_erased_external_sector = 0xFFFFFFFF;
+}
+
 static bool Flash_ErasePage(uint32_t address, uint32_t *last_erased_page)
 {
-    uint32_t page = (address - INTERNAL_START_ADDRESS) / FLASH_PAGE_SIZE;
+    uint32_t page = (address - START_ADDRESS) / FLASH_PAGE_SIZE;
 
     if (page == *last_erased_page)
     {
@@ -109,7 +114,7 @@ static bool Flash_ErasePage(uint32_t address, uint32_t *last_erased_page)
 
     if (HAL_FLASHEx_Erase(&erase_init, &page_error) != HAL_OK)
     {
-        printf("Unutarnji erase GRESKA, stranica=%lu\r\n", (unsigned long)page);
+        printf("Erase error");
         return false;
     }
 
@@ -126,7 +131,7 @@ static bool Flash_ProgramData(uint32_t address, const uint8_t *data, uint32_t le
 
         if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_DOUBLEWORD, address + i, doubleword) != HAL_OK)
         {
-            printf("Unutarnji write GRESKA, adresa=0x%08lX\r\n", (unsigned long)(address + i));
+            printf("Write errot\r\n");
             return false;
         }
     }
