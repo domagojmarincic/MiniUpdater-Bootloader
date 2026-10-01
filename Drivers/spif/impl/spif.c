@@ -107,18 +107,14 @@ bool spif_erase_sector(spif_handle_t *handle, uint32_t sector)
 
 	if(!spif_utils_is_ready(handle))
 	{
-	  printf("spif_erase_sector: is_ready FAILED\r\n");
 	  return false;
 	}
 	else if(!spif_utils_check_range(handle, address, SPIF_SECTOR_SIZE))
 	{
-	  printf("spif_erase_sector: check_range FAILED, addr=%lu, total_size=%lu\r\n",
-		 		 (unsigned long)address, (unsigned long)handle->total_size);
 	  return false;
 	}
 	else if(!spif_commander_command(handle, SPIF_CMD_WRITE_ENABLE))
 	{
-	  printf("spif_erase_sector: WRITE_ENABLE command FAILED\r\n");
 	  return false;
 	}
 
@@ -128,12 +124,10 @@ bool spif_erase_sector(spif_handle_t *handle, uint32_t sector)
 
 	if(!ret_val)
 	{
-		printf("spif_erase_sector: command_address FAILED\r\n");
 	  return false;
 	}
 	else if(!spif_commander_wait_for_writing(handle, SPIF_TIMEOUT_SECTOR_ERASE))
 	{
-		printf("spif_erase_sector: wait_for_writing TIMEOUT\r\n");
 	  return false;
 	}
 	return true;
